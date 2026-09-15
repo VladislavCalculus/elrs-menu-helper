@@ -1,0 +1,25 @@
+# macOS and editor metadata
+.DS_Store
+.vscode/
+.idea/
+
+# CMake and compiled output
+/build/
+/cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+Makefile
+CTestTestfile.cmake
+Testing/
+
+# Native build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
