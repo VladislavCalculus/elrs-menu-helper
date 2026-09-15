@@ -122,25 +122,27 @@ text_select_obj_t(uint8_t* out_ptr, const char* options, size_t options_size);
 * `options_size` — the size of the `options` parameter (`sizeof()`).
 
 4. **Command**
-   A value type that displays a button in the ELRS menu. When pressed, it invokes the command in a low-priority task.
+   A value type that displays a button in the ELRS menu. Menu events are passed directly to its handler; the handler must return quickly and must not block or wait for confirmation.
 
 ```c
-command_obj_t(const char *text, size_t t_size, uint16_t _timeout,
-              void (*execution_func)(command_obj_t &obj, bool *confirmed, bool *canceled));
+command_obj_t(const char *text, size_t t_size, uint8_t timeout,
+              void (*handler)(command_obj_t &obj, command_type_e event));
 ```
 
 * `text` — the text displayed in the confirmation window if used.
 * `t_size` — the size of the `text` parameter (`sizeof()`).
-* `_timeout` — the timeout of the function in the ELRS menu.
-* `execution_func` — the function executed when the command is sent by the Lua script in the ELRS menu. This function has the following parameters:
+* `timeout` — the menu timeout value.
+* `handler` — called immediately for a command event sent by the Lua script. This function has the following parameters:
 
   * `obj` — the object of this class; allows you to change variables to update displayed text (`obj.change_description(...)`) and type (`obj.type =`).
-  * `confirmed` and `canceled` — boolean variables that are `false` by default and changed to `true` by user actions in the ELRS menu (mainly in `CDM_RESP_CONFIRM`). These should be handled in `execution_func`.
+  * `event` — the event sent by the menu. On `CMD_CLICK`, schedule or flag application work and return. On later `CMD_QUERY` events, publish the current status through `obj`.
+
+The menu library does not create a task or thread. Long-running work belongs to the application: queue it to the platform scheduler or advance it from the application loop/state machine.
 
 There are different command entry types that can be used, each giving context info to the ELRS menu. Types sent by the ELRS menu are handled automatically (they start with `CMD_*`). Your function uses types with `CDM_RESP_*` to send status back to the menu.
 
 * `CDM_RESP_IDLE` — command is **not** running.
-* `CMD_CLICK` — user requested to start a command.
+* `CMD_CLICK` — user requested to start a command; schedule work and return immediately.
 * `CDM_RESP_EXECUTING` — working on the task. Should be active while executing the command (baseline if no other type is required).
 * `CDM_RESP_CONFIRM` — opens a confirmation window in the ELRS menu.
 * `CMD_CONFIRMED` — user pressed **Confirm**.

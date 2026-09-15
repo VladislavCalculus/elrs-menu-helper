@@ -31,8 +31,8 @@ size_t text_select_obj_t::get_size() {
     return str_len + 1 + TAIL_LEN;
 }
 
-esp_err_t text_select_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
-    if (!buffer || b_size == 0) return ESP_ERR_INVALID_ARG;
+packet_result_t text_select_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
+    if (!buffer || b_size == 0) return packet_result_t::invalid_argument;
 
     const size_t total = get_size();
     size_t out_i = 0;
@@ -54,9 +54,9 @@ esp_err_t text_select_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
 
     if (written >= total) {
         written = 0;
-        return ESP_OK;
+        return packet_result_t::complete;
     }
-    return ESP_ERR_NOT_FINISHED;
+    return packet_result_t::incomplete;
 }
 
 void text_select_obj_t::drop_written_counter() { written = 0; }

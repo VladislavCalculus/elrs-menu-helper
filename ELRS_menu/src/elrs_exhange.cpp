@@ -1,5 +1,4 @@
 #include "elrs_exhange.h"
-#include <esp_log.h>
 #include "interface/interface.h"
 #include "../elrs_menu.h"
 
@@ -43,10 +42,10 @@ void crsf_send_param_entry_reply(uint8_t entry_id, uint8_t req_extsrc, param_ent
         bool done = false;
         if(data_ptr != NULL) {
             if (data_cap > 0) {
-                const esp_err_t fp = data_ptr->form_packet(payload + p, data_cap);
-                if (fp == ESP_ERR_NOT_FINISHED) {
+                const packet_result_t fp = data_ptr->form_packet(payload + p, data_cap);
+                if (fp == packet_result_t::incomplete) {
                     wrote = data_cap;
-                } else if (fp == ESP_OK) {
+                } else if (fp == packet_result_t::complete) {
                     const size_t remaining = total_bytes - data_sent;
                     wrote = remaining;
                     done = true;
@@ -99,41 +98,6 @@ const uint8_t CRSF_WRITE_STRING_FAIL[] = {
   0xCD
 };
 
-param_entry_t *command_entry_cfg;
-static TaskHandle_t e_cmd_task = NULL;
-
-bool confirmed = false;
-bool canceled = false;
-void handle_command_execution_task(void *pvParameters){
-    while(1) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        command_obj_t *cmd_obj = (command_obj_t*)command_entry_cfg->value;
-
-        confirmed = false;
-        canceled = false;
-        cmd_obj->type = CDM_RESP_EXECUTING;
-
-        cmd_obj->execute(&confirmed, &canceled);
-
-        cmd_obj->type = CDM_RESP_IDLE;
-    }
-}
-
-static inline void ensure_cmd_task_started()
-{
-    if (e_cmd_task == NULL) {
-        xTaskCreatePinnedToCore(
-            handle_command_execution_task,
-            "handle command execution task",
-            1024*4,
-            NULL,
-            10,
-            &e_cmd_task,
-            0
-        );
-    }
-}
-
 const uint8_t PAYLOAD_OFFSET = 6;
 const uint8_t TYPE_IDX = 6;
 void crsf_device_write(uint8_t packet[], param_entry_t *e_cfg) {
@@ -143,23 +107,22 @@ void crsf_device_write(uint8_t packet[], param_entry_t *e_cfg) {
     } else if(e_cfg->param_type == CRSF_PARAM_TYPE_TEXT_SELECTION) {
         *(e_cfg->value->out) = packet[PAYLOAD_OFFSET];
     } else if(e_cfg->param_type == CRSF_PARAM_TYPE_COMMAND) {
+        command_obj_t *cmd_obj = (command_obj_t*)e_cfg->value;
         switch (packet[TYPE_IDX]) {
-            case CMD_CLICK: {
-                ensure_cmd_task_started();
-                command_entry_cfg = e_cfg;
-                xTaskNotifyGive(e_cmd_task);
+            case CMD_CLICK:
+                cmd_obj->handle_event(CMD_CLICK);
                 break;
-            }
 
             case CMD_CONFIRMED:
-                confirmed = true;
+                cmd_obj->handle_event(CMD_CONFIRMED);
                 break;
 
             case CMD_CANCEL:
-                canceled = true;
+                cmd_obj->handle_event(CMD_CANCEL);
                 break;
                 
             case CMD_QUERY: {
+                cmd_obj->handle_event(CMD_QUERY);
                 crsf_send_param_entry_reply(packet[5], 0xEE, *e_cfg);
                 break;
             }

@@ -1,14 +1,19 @@
 #ifndef __entr_cls__
 #define __entr_cls__
 
+#include <stdint.h>
+#include <cstddef>
+#include <cstring>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <stdint.h>
-#include <cstring>
-#include <esp_err.h>
-#include "stdint.h"
+enum class packet_result_t : uint8_t {
+    complete,
+    incomplete,
+    invalid_argument,
+};
 
 struct param_entry_data {
     uint8_t *out;
@@ -16,7 +21,7 @@ struct param_entry_data {
     param_entry_data(uint8_t *outer_v) : out(outer_v) {}
     virtual ~param_entry_data() = default;
     virtual size_t get_size() = 0;
-    virtual esp_err_t form_packet(uint8_t buffer[], size_t b_size) = 0;
+    virtual packet_result_t form_packet(uint8_t buffer[], size_t b_size) = 0;
 };
 
 class text_select_obj_t final: public param_entry_data {
@@ -31,7 +36,7 @@ class text_select_obj_t final: public param_entry_data {
     public:
         text_select_obj_t(uint8_t* out_ptr, const char* options, size_t options_size);
         size_t get_size() override;
-        esp_err_t form_packet(uint8_t* buffer, size_t b_size) override;
+        packet_result_t form_packet(uint8_t* buffer, size_t b_size) override;
         void drop_written_counter();
 };
 
@@ -44,7 +49,7 @@ class info_obj_t final: public param_entry_data {
     public:
         info_obj_t(const char *text, size_t t_size);
         size_t get_size() override;
-        esp_err_t form_packet(uint8_t* buffer, size_t b_size) override;
+        packet_result_t form_packet(uint8_t* buffer, size_t b_size) override;
         void change_info_text(const char *text, size_t t_size);
 };
 
@@ -59,9 +64,12 @@ typedef enum {
 } command_type_e;
 
 class command_obj_t final: public param_entry_data {
+    public:
+        // Called synchronously for CRSF command events. It must return quickly.
+        using EventHandler = void (*)(command_obj_t &obj, command_type_e event);
+
     private:
-        using ExecFn = void (*)(command_obj_t &obj, bool *confirmed, bool *canceled);
-        ExecFn executable = nullptr;
+        EventHandler event_handler = nullptr;
 
         uint8_t timeout = 200;
         uint8_t *description = nullptr;
@@ -71,13 +79,12 @@ class command_obj_t final: public param_entry_data {
         void drop_written_counter();
     
     public:
-        
         command_type_e type = CDM_RESP_IDLE;
 
-        command_obj_t(const char *text, size_t t_size, uint8_t _timeout, ExecFn execution_func);
+        command_obj_t(const char *text, size_t t_size, uint8_t _timeout, EventHandler handler);
         size_t get_size() override;
-        esp_err_t form_packet(uint8_t* buffer, size_t b_size) override;
-        void execute(bool *confirmed, bool *canceled);
+        packet_result_t form_packet(uint8_t* buffer, size_t b_size) override;
+        void handle_event(command_type_e event);
         void change_description(const char *text, size_t t_size);
 };
 
@@ -99,7 +106,7 @@ class int_obj_t final : public param_entry_data {
         int_obj_t(void* out_ptr, size_t value_width, uint64_t vmin, uint64_t vmax, uint64_t vdef);
         size_t value_width() const;
         size_t get_size() override;
-        esp_err_t form_packet(uint8_t* buffer, size_t b_size) override;
+        packet_result_t form_packet(uint8_t* buffer, size_t b_size) override;
         bool apply_write(const uint8_t* src, size_t len);
 };
 

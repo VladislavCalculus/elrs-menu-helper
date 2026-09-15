@@ -10,8 +10,8 @@ size_t info_obj_t::get_size() {
     return n + 1;
 }
 
-esp_err_t info_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
-    if (!buffer || b_size == 0) return ESP_ERR_INVALID_ARG;
+packet_result_t info_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
+    if (!buffer || b_size == 0) return packet_result_t::invalid_argument;
 
     const size_t total = get_size();
     size_t out_i = 0;
@@ -21,8 +21,8 @@ esp_err_t info_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
         ++written;
     }
 
-    if (written >= total) { written = 0; return ESP_OK; }
-    return ESP_ERR_NOT_FINISHED;
+    if (written >= total) { written = 0; return packet_result_t::complete; }
+    return packet_result_t::incomplete;
 }
 
 void info_obj_t::change_info_text(const char *text, size_t t_size) {

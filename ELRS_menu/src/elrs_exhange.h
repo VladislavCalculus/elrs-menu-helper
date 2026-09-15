@@ -1,14 +1,14 @@
 #ifndef __elrs_exhange__
 #define __elrs_exhange__
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "stdint.h"
 #include "driver/uart.h"
 #include <string.h>
 #include "user_dfn.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define MAX_PACKET_SIZE 64
 #define MAX_PAYLOAD_SIZE 56

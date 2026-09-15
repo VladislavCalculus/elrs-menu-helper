@@ -1,7 +1,5 @@
 #include "elrs_exhange.h"
-#include "driver/uart.h"
 #include "../elrs_menu.h"
-#include "esp_log.h"
 
 param_entry_t ARR_TERMINATOR {
     .name = "",

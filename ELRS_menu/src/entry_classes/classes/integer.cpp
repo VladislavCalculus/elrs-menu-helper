@@ -124,8 +124,8 @@ size_t int_obj_t::value_width() const { return width; }
 size_t int_obj_t::get_size() { return width * 4 + 2; }
 
 // ----- stream to wire (BE) -----
-esp_err_t int_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
-    if (!buffer || b_size == 0) return ESP_ERR_INVALID_ARG;
+packet_result_t int_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
+    if (!buffer || b_size == 0) return packet_result_t::invalid_argument;
     uint8_t frame[4 * MAXW + 2];
     const size_t base = 4 * width;
 
@@ -153,8 +153,8 @@ esp_err_t int_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
     std::memcpy(buffer, frame + written, chunk);
     written += chunk;
 
-    if (written >= total) { written = 0; return ESP_OK; }
-    return ESP_ERR_NOT_FINISHED;
+    if (written >= total) { written = 0; return packet_result_t::complete; }
+    return packet_result_t::incomplete;
 }
 
 // ----- parse write from wire (BE) -> host (native) -----

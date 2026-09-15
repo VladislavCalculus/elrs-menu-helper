@@ -1,13 +1,12 @@
 #ifndef __lua_elrs_menu__
 #define __lua_elrs_menu__
 
+#include "stdint.h"
+#include "src/user_dfn.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include "stdint.h"
-#include "driver/uart.h"
-#include "src/user_dfn.h"
 
 typedef struct {
     uint8_t address;

@@ -1,18 +1,18 @@
 #include "../entr_cls.h"
 
-command_obj_t::command_obj_t(const char *text, size_t t_size, uint8_t _timeout, ExecFn execution_func) : param_entry_data(NULL) {
+command_obj_t::command_obj_t(const char *text, size_t t_size, uint8_t _timeout, EventHandler handler) : param_entry_data(NULL) {
     description = (uint8_t*)text;
     desc_size = t_size;
     timeout = _timeout;
-    executable = execution_func;
+    event_handler = handler;
 }
 
 size_t command_obj_t::get_size() {
     return desc_size+2;
 }
 
-esp_err_t command_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
-    if(b_size < 3) return ESP_ERR_INVALID_ARG;
+packet_result_t command_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
+    if(b_size < 3) return packet_result_t::invalid_argument;
     
     if(written == 0) {
         buffer[0] = type;
@@ -21,21 +21,21 @@ esp_err_t command_obj_t::form_packet(uint8_t* buffer, size_t b_size) {
         buffer[1] = timeout;
     }
     
-    for(int i = 2; i < b_size; i++) {
+    for(size_t i = 2; i < b_size; i++) {
         if(written >= desc_size || description[written] == '\0') {
             buffer[i] = '\0';
             drop_written_counter();
-            return ESP_OK;
+            return packet_result_t::complete;
         }
 
         buffer[i] = description[written];
         written++;
     }
-    return ESP_ERR_NOT_FINISHED;
+    return packet_result_t::incomplete;
 }
 
-void command_obj_t::execute(bool *confirmed, bool *canceled) {
-    if (executable) executable(*this, confirmed, canceled);
+void command_obj_t::handle_event(command_type_e event) {
+    if (event_handler) event_handler(*this, event);
 }
 
 void command_obj_t::drop_written_counter() { written = 0; }

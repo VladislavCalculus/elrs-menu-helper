@@ -1,11 +1,11 @@
 #ifndef __uart_dfn__
 #define __uart_dfn__
 
+#include "entry_classes/entr_cls.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include "entry_classes/entr_cls.h"
 
 #define CRSF_ADDRESS_FLIGHT_CONTROLLER            0xC8
 #define CRSF_ADDRESS_RADIO_TRANSMITTER            0xEA
