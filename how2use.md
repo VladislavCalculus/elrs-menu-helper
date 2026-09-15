@@ -8,6 +8,10 @@ Include the C++17 public header:
 
 The library owns the ELRS parameter protocol. Your application supplies two things: the parameter data to expose and a callback that transmits complete outgoing CRSF frames.
 
+For CMake integration, link the `ELRS_menu::ELRS_menu` target with either
+`add_subdirectory(...)` or `find_package(ELRS_menu CONFIG REQUIRED)`; see the
+[README](README.md#add-to-a-cmake-project) for both forms.
+
 ## Setup
 
 1. Create the value objects (`info_obj_t`, `int_obj_t`, `text_select_obj_t`, or `command_obj_t`).

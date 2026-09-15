@@ -26,7 +26,8 @@ It handles device discovery, parameter enumeration, parameter reads and writes, 
 ### As a subdirectory
 
 ```cmake
-add_subdirectory(path/to/ELRS_menu)
+# The path is the directory containing this repository's CMakeLists.txt.
+add_subdirectory(path/to/elrs-menu-helper)
 target_link_libraries(my_firmware PRIVATE ELRS_menu::ELRS_menu)
 ```
 
@@ -34,6 +35,7 @@ target_link_libraries(my_firmware PRIVATE ELRS_menu::ELRS_menu)
 
 ```sh
 cmake -S . -B build
+cmake --build build
 cmake --install build --prefix /your/prefix
 ```
 

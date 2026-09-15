@@ -1,4 +1,5 @@
-// C++17 example. Include <elrs_menu/elrs_menu.hpp> in the application.
+// C++17 example. Link ELRS_menu::ELRS_menu and include
+// <elrs_menu/elrs_menu.hpp> in the application.
 
 struct CrsfTransport {
     void write(const uint8_t *data, size_t size);
