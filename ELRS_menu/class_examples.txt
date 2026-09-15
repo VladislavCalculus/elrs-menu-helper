@@ -1,0 +1,153 @@
+//when using command, we need to write time-to-time, so there are a need for writing function
+void elrs_menu_writing_func(uint8_t *buffer, size_t size) {
+    uart_write_bytes(UART_CRSF, buffer, size);
+}
+
+crsf_ping_responce_t r_cfg = {
+    .name = "Virtual Insanity",
+    .serial = 0x434F4E56,
+    .hwver = (1u<<24)|(0u<<16)|(0u<<8)|0u,
+    .swver = (0u<<24)|(1u<<16)|(2u<<8)|3u,
+    .param_count = 0,
+    .param_proto = 2,
+    .w_func = elrs_menu_writing_func,
+};
+
+const char str_test[] = "Ready, Ready\nReady, Ready\nReady, Ready\nReady, Ready\nReady, Ready";
+info_obj_t str(str_test, sizeof(str_test));
+param_entry_t e_cfg {
+    .name = "Status",
+    .value = &str,
+    .entry_root = PARENT_ENTRY_ROUTE_GLOBAL,
+    .param_type = CRSF_PARAM_TYPE_INFO,
+    .w_func = elrs_menu_writing_func
+};
+
+const char *options_txt[] = {"Ready", "Not Ready", "AfroAmercano", "2froAmercano", "3froAmercano"};
+char options[] = "Ready;Not Ready;AfroAmercano;2froAmercano;3froAmercano";
+uint8_t choice_curr = 0;
+
+text_select_obj_t test_select(&choice_curr, options, sizeof(options));
+param_entry_t e_cfg_3 {
+    .name = "Alabama",
+    .value = &test_select,
+    .entry_root = 2,
+    .param_type = CRSF_PARAM_TYPE_TEXT_SELECTION,
+    .w_func = elrs_menu_writing_func
+};
+
+// char str[] = "Folllder!!";
+param_entry_t e_cfg_5 {
+    .name = "MIX",
+    .value = NULL,
+    .entry_root = PARENT_ENTRY_ROUTE_GLOBAL,
+    .param_type = CRSF_PARAM_TYPE_FOLDER,
+    .w_func = elrs_menu_writing_func
+};
+
+//The func will be running in separate task with low priority
+//Option for canceling the func should be handled here to avoid unexpected problems
+void exmp_func(command_obj_t &obj, bool *confirmed, bool *canceled) {
+    //starting the func
+    //CDM_RESP_EXECUTING - means that the work is in progress
+    obj.type = CDM_RESP_EXECUTING;
+    ESP_LOGI("tag", "STEP3");
+    obj.change_description("Running…", sizeof("Running…"));
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    //Asking for confirmation from remote
+    //the text there can be changed and will be dispaley on top of the pop-up
+    obj.change_description("Confirm :)", sizeof("Confirm :)"));
+    //this type will evoke pop-up
+    obj.type = CDM_RESP_CONFIRM;
+    //waiting till remote gives conformation
+    while(!(*confirmed)) {
+        //if the func is terminated, we just stop it.
+        if(*canceled) {
+            ESP_LOGW("tag", "cancel.");
+            obj.change_description("Canceled.", sizeof("Confirmed"));
+            obj.type = CDM_RESP_IDLE;
+            return;
+        }
+        vTaskDelay(20);
+    }
+    //changing text
+    obj.change_description("Confirmed", sizeof("Confirmed"));
+    obj.type = CDM_RESP_CONFIRM;
+    vTaskDelay(20);
+    //pop-up will not dissapear, but user will see "progress" wheel
+    obj.type = CDM_RESP_EXECUTING;
+    ESP_LOGW("tag", "STEP2");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    ESP_LOGE("tag", "STEP1");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    ESP_LOGI("tag", "STEP0");
+    obj.change_description("Done.", sizeof("Done."));
+    str.change_info_text(options_txt[choice_curr], strlen(options_txt[choice_curr]));
+    //setting packet type to 0 means that execution of the func ended
+    obj.type = CDM_RESP_IDLE;
+}
+
+command_obj_t cmd = {"Hello world!", sizeof("Hello world!"), 200, exmp_func};
+param_entry_t e_cfg_7 {
+    .name = "COMMAND!",
+    .value = &cmd,
+    .entry_root = 2,
+    .param_type = CRSF_PARAM_TYPE_COMMAND,
+    .w_func = elrs_menu_writing_func
+};
+
+param_entry_t e_cfg_n {
+    .name = "Numbers",
+    .value = NULL,
+    .entry_root = PARENT_ENTRY_ROUTE_GLOBAL,
+    .param_type = CRSF_PARAM_TYPE_FOLDER,
+    .w_func = elrs_menu_writing_func
+};
+
+int16_t i16_cur = -120;
+int_obj_t i16_obj(&i16_cur, sizeof(i16_cur), true, -500, 500, i16_cur);
+param_entry_t e_cfg_16 {
+    .name = "INT16",
+    .value = &i16_obj,
+    .entry_root = 5,
+    .param_type = CRSF_PARAM_TYPE_INT16,
+    .w_func = elrs_menu_writing_func
+};
+
+uint16_t ui16_cur = 120;
+int_obj_t ui16_obj(&ui16_cur, sizeof(ui16_cur), false, 0, 130, ui16_cur);
+param_entry_t e_cfg_u16 {
+    .name = "UINT16",
+    .value = &ui16_obj,
+    .entry_root = 5,
+    .param_type = CRSF_PARAM_TYPE_UINT16,
+    .w_func = elrs_menu_writing_func
+};
+
+int8_t i8_cur = 8;
+int_obj_t i8_obj(&i8_cur, sizeof(i8_cur), true, 6, 20, i8_cur);
+param_entry_t e_cfg_8 {
+    .name = "INT8",
+    .value = &i8_obj,
+    .entry_root = 5,
+    .param_type = CRSF_PARAM_TYPE_INT8,
+    .w_func = elrs_menu_writing_func
+};
+
+uint8_t ui8_cur = 5;
+int_obj_t ui8_obj(&ui8_cur, sizeof(ui8_cur), false, 0, 12, ui8_cur);
+param_entry_t e_cfg_u8 {
+    .name = "UINT8",
+    .value = &ui8_obj,
+    .entry_root = 5,
+    .param_type = CRSF_PARAM_TYPE_UINT8,
+    .w_func = elrs_menu_writing_func
+};
+
+param_entry_t param_cfg[] = {e_cfg, e_cfg_5, e_cfg_3, e_cfg_7, e_cfg_n, e_cfg_u8, e_cfg_8, e_cfg_u16, e_cfg_16, ARR_TERMINATOR};
+
+lua_elrs_menu_config_t menu_cfg = {
+    .address = CRSF_ADDRESS_CRSF_TRANSMITTER,
+    .ping_responce = &r_cfg,
+    .prameters_list = param_cfg
+};
