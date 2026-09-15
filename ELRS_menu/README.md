@@ -1,11 +1,26 @@
-This is ELRS menu handling library.
-The main purpose of it is to handle exchange between ELRS menu lua script and your device.
-Configuration of handler goes as follows:
+ELRS Menu is a C++17 library that serves CRSF parameter-menu requests from ELRS Lua.
 
-1) create ping response structure
-2) create N number of parameters, than equals to your number of parameters passed into ping response.
-NOTE: always end this array with `ARR_TERMINATOR`.
-3) create lua_elrs_menu_config_t
-4) Use handle_exchange function: pass CRSF uint8_t buffer (before unpacking into 16 channels) and your lua_elrs_menu_config_t
+Include `<elrs_menu/elrs_menu.hpp>`, provide a transport callback, create an `elrs_menu_t`, and give each complete received CRSF frame to `handle_exchange()`.
 
-more detailed information can be found in `how2use.md`
+```cpp
+void write_crsf(const uint8_t *data, size_t size, void *context) {
+    static_cast<MyUart *>(context)->write(data, size);
+}
+
+param_entry_t parameters[] = {
+    {"Mode", &mode_entry, PARENT_ENTRY_ROUTE_GLOBAL, CRSF_PARAM_TYPE_TEXT_SELECTION},
+};
+
+elrs_menu_config_t config{};
+config.device_info = {"My device", 123, 1, 1, 1};
+config.parameters = parameters;
+config.parameter_count = sizeof(parameters) / sizeof(parameters[0]);
+config.write = write_crsf;
+config.write_context = &uart;
+elrs_menu_t menu{config};
+
+// frame_size is the actual number of received bytes, including address, length and CRC.
+const bool was_menu_frame = handle_exchange(menu, frame, frame_size);
+```
+
+There is no terminator entry and no global exchange state. `crsf_menu_addresses_t` defaults to the usual ELRS topology but allows the outer transport destination, device address, and Lua address to be changed.

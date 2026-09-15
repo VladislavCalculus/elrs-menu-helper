@@ -1,202 +1,93 @@
 #include "elrs_exhange.h"
-#include "interface/interface.h"
-#include "../elrs_menu.h"
+#include <cstring>
 
-static inline int crc8_data(uint8_t data[], int data_len) {
+static uint8_t crc8_data(const uint8_t *data, std::size_t count) {
     uint8_t crc = 0;
-    for(int i = 0; i < data_len; i++) {
-        crc = crc ^ data[i];
-        for(int j = 0; j < 8; j++) {
-            if(crc & 0x80) {
-                crc = (crc << 1) ^ 0xD5;
-            } else {
-                crc = crc << 1;
-            }
-        }
+    for (std::size_t i = 0; i < count; ++i) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit)
+            crc = crc & 0x80 ? static_cast<uint8_t>((crc << 1) ^ 0xD5) : static_cast<uint8_t>(crc << 1);
     }
     return crc;
 }
+static void put_u32_le(uint8_t *out, uint32_t v) {
+    out[0] = static_cast<uint8_t>(v); out[1] = static_cast<uint8_t>(v >> 8);
+    out[2] = static_cast<uint8_t>(v >> 16); out[3] = static_cast<uint8_t>(v >> 24);
+}
 
-void crsf_send_param_entry_reply(uint8_t entry_id, uint8_t req_extsrc, param_entry_t e_cfg)
-{
-    param_entry_data* data_ptr = e_cfg.value;
-    const size_t total_bytes = data_ptr != NULL ? data_ptr->get_size() : 0;   // includes '\0' + 5 tail bytes
-    size_t data_sent = 0;
-
+void crsf_send_param_entry_reply(uint8_t entry_id,
+                                 const elrs_menu_config_t &config, param_entry_t &entry) {
+    param_entry_data *data = entry.value;
+    const std::size_t total = data ? data->get_size() : 0;
+    std::size_t sent = 0;
     for (;;) {
-        uint8_t payload[MAX_PAYLOAD_SIZE];
-        size_t p = 0;
-
-        if (data_sent == 0) {
-            payload[p++] = e_cfg.entry_root;
-            payload[p++] = e_cfg.param_type;
-            const size_t name_len = strlen(e_cfg.name) + 1;
-            const size_t fit = MAX_PAYLOAD_SIZE - p;
-            const size_t copy = (name_len > fit) ? fit : name_len;
-            memcpy(&payload[p], e_cfg.name, copy);
-            p += copy;
+        uint8_t payload[MAX_PAYLOAD_SIZE]{};
+        std::size_t payload_size = 0;
+        if (sent == 0) {
+            payload[payload_size++] = entry.entry_root;
+            payload[payload_size++] = static_cast<uint8_t>(entry.param_type);
+            const std::size_t name_size = std::strlen(entry.name) + 1;
+            const std::size_t copy = name_size < MAX_PAYLOAD_SIZE - payload_size ? name_size : MAX_PAYLOAD_SIZE - payload_size;
+            std::memcpy(payload + payload_size, entry.name, copy); payload_size += copy;
         }
-
-        const size_t data_cap = MAX_PAYLOAD_SIZE - p;
-        size_t wrote = 0;
-        bool done = false;
-        if(data_ptr != NULL) {
-            if (data_cap > 0) {
-                const packet_result_t fp = data_ptr->form_packet(payload + p, data_cap);
-                if (fp == packet_result_t::incomplete) {
-                    wrote = data_cap;
-                } else if (fp == packet_result_t::complete) {
-                    const size_t remaining = total_bytes - data_sent;
-                    wrote = remaining;
-                    done = true;
-                } else {
-                    return;
-                }
-            }
-
-            p += wrote;
-            data_sent += wrote;
-        } else {
-            done = true;
+        bool complete = !data;
+        if (data) {
+            const std::size_t cap = MAX_PAYLOAD_SIZE - payload_size;
+            if (!cap) return;
+            const packet_result_t result = data->form_packet(payload + payload_size, cap);
+            if (result == packet_result_t::invalid_argument) return;
+            const std::size_t wrote = result == packet_result_t::incomplete ? cap : total - sent;
+            payload_size += wrote; sent += wrote; complete = result == packet_result_t::complete;
         }
-
-        const size_t remaining = (total_bytes > data_sent) ? (total_bytes - data_sent) : 0;
-        const uint8_t packets_left =
-            (remaining == 0) ? 0 : (uint8_t)((remaining + (MAX_PAYLOAD_SIZE - 1)) / MAX_PAYLOAD_SIZE);
-
-        const uint8_t len_field = (uint8_t)(1 + 2 + 2 + p + 1);
-        if (len_field > CRSF_LEN_MAX) return;
-
-        uint8_t buf[2 + 1 + 2 + 2 + MAX_PAYLOAD_SIZE + 1];
-        size_t i = 0;
-        buf[i++] = CRSF_ADDR_TX;
-        buf[i++] = len_field;
-        buf[i++] = CRSF_FRAMETYPE_PARAMETER_SETTINGS_ENTRY;
-        buf[i++] = CRSF_ADDRESS_ELRS_LUA;
-        buf[i++] = req_extsrc;
-        buf[i++] = entry_id;
-        buf[i++] = packets_left;
-        memcpy(&buf[i], payload, p); i += p;
-        buf[i++] = crc8_data(&buf[2], (size_t)len_field - 1);
-
-        e_cfg.w_func(buf, i);
-
-        if (remaining == 0) break;
-        if (done) break;
+        const std::size_t remaining = total - sent;
+        const uint8_t left = remaining ? static_cast<uint8_t>((remaining + MAX_PAYLOAD_SIZE - 1) / MAX_PAYLOAD_SIZE) : 0;
+        const uint8_t length = static_cast<uint8_t>(1 + 2 + 2 + payload_size + 1);
+        if (length > CRSF_LEN_MAX) return;
+        uint8_t output[MAX_PACKET_SIZE]{};
+        std::size_t i = 0;
+        output[i++] = config.addresses.transport_destination; output[i++] = length; output[i++] = CRSF_FRAMETYPE_PARAMETER_SETTINGS_ENTRY;
+        output[i++] = config.addresses.menu_address; output[i++] = config.addresses.device_address;
+        output[i++] = entry_id; output[i++] = left;
+        std::memcpy(output + i, payload, payload_size); i += payload_size;
+        output[i++] = crc8_data(output + 2, length - 1);
+        config.write(output, i, config.write_context);
+        if (remaining == 0 || complete) return;
     }
 }
 
-const uint8_t CRSF_WRITE_STRING_SUCCESS[] = {
-  0xC8, 0x0D, 0x2D, 0xEE, 0xEF, 0xFF,
-  'S','u','c','c','e','s','s', 0x00,
-  0xE7
-};
-
-const uint8_t CRSF_WRITE_STRING_FAIL[] = {
-  0xC8, 0x0A, 0x2D, 0xEE, 0xEF, 0xFF,
-  'F','a','i','l', 0x00,
-  0xCD
-};
-
-const uint8_t PAYLOAD_OFFSET = 6;
-const uint8_t TYPE_IDX = 6;
-void crsf_device_write(uint8_t packet[], param_entry_t *e_cfg) {
-    if(e_cfg->param_type >= CRSF_PARAM_TYPE_UINT8 && e_cfg->param_type <= CRSF_PARAM_TYPE_INT16) {
-        int_obj_t *num_obj = (int_obj_t*) e_cfg->value;
-        num_obj->apply_write(&packet[PAYLOAD_OFFSET], num_obj->value_width());
-    } else if(e_cfg->param_type == CRSF_PARAM_TYPE_TEXT_SELECTION) {
-        *(e_cfg->value->out) = packet[PAYLOAD_OFFSET];
-    } else if(e_cfg->param_type == CRSF_PARAM_TYPE_COMMAND) {
-        command_obj_t *cmd_obj = (command_obj_t*)e_cfg->value;
-        switch (packet[TYPE_IDX]) {
-            case CMD_CLICK:
-                cmd_obj->handle_event(CMD_CLICK);
-                break;
-
-            case CMD_CONFIRMED:
-                cmd_obj->handle_event(CMD_CONFIRMED);
-                break;
-
-            case CMD_CANCEL:
-                cmd_obj->handle_event(CMD_CANCEL);
-                break;
-                
-            case CMD_QUERY: {
-                cmd_obj->handle_event(CMD_QUERY);
-                crsf_send_param_entry_reply(packet[5], 0xEE, *e_cfg);
-                break;
-            }
-
-            default:
-                break;
-        }
-    }
-    //this is purelly for CUSTOM config from remote handleing, it isn't usiversal. Change for your needs.
-    else if(e_cfg->param_type == CRSF_PARAM_TYPE_STRING) {
-        char c_buffer[MAX_BUFF_SIZE];
-        char *buf[MAX_TOKENS+1];
-        uint8_t n = 0;
-
-        if(parse_string((char*)&packet[PAYLOAD_OFFSET], buf, &n) != ESP_OK) {
-            uart_write_bytes(UART_NUM_2, CRSF_WRITE_STRING_FAIL, sizeof(CRSF_WRITE_STRING_FAIL));
-        } else {
-            return;
-        }
-
-        char **arg = (n > 1) ? &buf[1] : NULL;
-        if(execute_command(buf[0], !custom_commands ? COMMANDS : CUSTOM_COMMANDS, !custom_commands ? NUM_OF_COMMANDS : NUM_OF_CUSTOM_COMMANDS, arg, c_buffer) == ESP_OK) {
-            uart_write_bytes(UART_NUM_2, CRSF_WRITE_STRING_SUCCESS, sizeof(CRSF_WRITE_STRING_SUCCESS));
-        } else {
-            uart_write_bytes(UART_NUM_2, CRSF_WRITE_STRING_FAIL, sizeof(CRSF_WRITE_STRING_FAIL));
+void crsf_device_write(const uint8_t *packet, std::size_t size,
+                       const elrs_menu_config_t &config, param_entry_t &entry) {
+    constexpr std::size_t payload = 6;
+    if (!entry.value || size <= payload) return;
+    if (entry.param_type >= CRSF_PARAM_TYPE_UINT8 && entry.param_type <= CRSF_PARAM_TYPE_INT16) {
+        auto *number = static_cast<int_obj_t *>(entry.value);
+        if (size >= payload + number->value_width()) number->apply_write(packet + payload, number->value_width());
+    } else if (entry.param_type == CRSF_PARAM_TYPE_TEXT_SELECTION) {
+        *entry.value->out = packet[payload];
+    } else if (entry.param_type == CRSF_PARAM_TYPE_COMMAND) {
+        auto *command = static_cast<command_obj_t *>(entry.value);
+        const auto event = static_cast<command_type_e>(packet[payload]);
+        switch (event) {
+        case CMD_CLICK: case CMD_CONFIRMED: case CMD_CANCEL: command->handle_event(event); break;
+        case CMD_QUERY: command->handle_event(event); crsf_send_param_entry_reply(packet[5], config, entry); break;
+        default: break;
         }
     }
 }
 
-static void responce_cfg_count_entry(crsf_ping_responce_t *r_cfg, param_entry_t e_cfg[]) {
-    if(e_cfg == NULL) {
-        return;
-    }
-
-    for(uint8_t i = 0; i < UINT8_MAX; i++) {
-        if(e_cfg[i].param_type == PARAM_ARRAY_TERMINATOR) {
-            r_cfg->param_count = i;
-            return;
-        }
-    }
-}
-
-void crsf_device_ping_response(uint8_t ping_extsrc, crsf_ping_responce_t *r_cfg, param_entry_t e_cfg[])
-{
-    responce_cfg_count_entry(r_cfg, e_cfg);
-    size_t name_len    = strlen(r_cfg->name) + 1; // include NUL
-    size_t devinfo_len = name_len + 4 + 4 + 4 + 1 + 1;
-    uint8_t len_field  = (uint8_t)(1 /*type*/ + 2 /*ext*/ + devinfo_len + 1 /*crc*/);
-
-    if (len_field > CRSF_LEN_MAX) {
-        size_t min_fixed = 4+4+4+1+1;
-        size_t max_name  = (CRSF_LEN_MAX - (1+2+1)) - min_fixed;
-        if ((int)max_name <= 0) return;
-        if (name_len > max_name) name_len = max_name;
-        devinfo_len = name_len + min_fixed;
-        len_field   = (uint8_t)(1 + 2 + devinfo_len + 1);
-    }
-
-    uint8_t buf[2 + 1 + 2 + 58 + 1];
-    size_t i = 0;
-
-    buf[i++] = CRSF_ADDR_TX;
-    buf[i++] = len_field;
-    buf[i++] = CRSF_TYPE_DEVICE_INFO;
-    buf[i++] = ping_extsrc;
-    buf[i++] = OUT_EXT_ADDR;
-
-    memcpy(&buf[i], r_cfg->name,   name_len); i += name_len;
-    memcpy(&buf[i], &r_cfg->serial, 4);       i += 4;
-    memcpy(&buf[i], &r_cfg->hwver,  4);       i += 4;
-    memcpy(&buf[i], &r_cfg->swver,  4);       i += 4;
-    buf[i++] = r_cfg->param_count;
-    buf[i++] = r_cfg->param_proto;
-
-    buf[i++] = crc8_data(&buf[2], (size_t)len_field - 1);
-    r_cfg->w_func(buf, i);
+void crsf_device_ping_response(uint8_t requester, const elrs_menu_config_t &config) {
+    const crsf_device_info_t &info = config.device_info;
+    constexpr std::size_t fixed = 14;
+    std::size_t name_size = std::strlen(info.name) + 1;
+    if (1 + 2 + name_size + fixed + 1 > CRSF_LEN_MAX) name_size = CRSF_LEN_MAX - (1 + 2 + fixed + 1);
+    const uint8_t length = static_cast<uint8_t>(1 + 2 + name_size + fixed + 1);
+    uint8_t output[MAX_PACKET_SIZE]{}; std::size_t i = 0;
+    output[i++] = config.addresses.transport_destination; output[i++] = length; output[i++] = CRSF_TYPE_DEVICE_INFO;
+    output[i++] = requester; output[i++] = config.addresses.device_address;
+    std::memcpy(output + i, info.name, name_size); i += name_size;
+    put_u32_le(output + i, info.serial); i += 4; put_u32_le(output + i, info.hardware_version); i += 4;
+    put_u32_le(output + i, info.software_version); i += 4;
+    output[i++] = static_cast<uint8_t>(config.parameter_count); output[i++] = info.parameter_protocol;
+    output[i++] = crc8_data(output + 2, length - 1);
+    config.write(output, i, config.write_context);
 }

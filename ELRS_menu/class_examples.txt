@@ -1,158 +1,80 @@
-//when using command, we need to write time-to-time, so there are a need for writing function
-void elrs_menu_writing_func(uint8_t *buffer, size_t size) {
-    uart_write_bytes(UART_CRSF, buffer, size);
+// C++17 example. Include <elrs_menu/elrs_menu.hpp> in the application.
+
+struct CrsfTransport {
+    void write(const uint8_t *data, size_t size);
+};
+
+void elrs_menu_write(const uint8_t *data, size_t size, void *context) {
+    static_cast<CrsfTransport *>(context)->write(data, size);
 }
 
-crsf_ping_responce_t r_cfg = {
-    .name = "Virtual Insanity",
-    .serial = 0x434F4E56,
-    .hwver = (1u<<24)|(0u<<16)|(0u<<8)|0u,
-    .swver = (0u<<24)|(1u<<16)|(2u<<8)|3u,
-    .param_count = 0,
-    .param_proto = 2,
-    .w_func = elrs_menu_writing_func,
-};
+const char status_text[] = "Ready";
+info_obj_t status_value{status_text, sizeof(status_text)};
 
-const char str_test[] = "Ready, Ready\nReady, Ready\nReady, Ready\nReady, Ready\nReady, Ready";
-info_obj_t str(str_test, sizeof(str_test));
-param_entry_t e_cfg {
-    .name = "Status",
-    .value = &str,
-    .entry_root = PARENT_ENTRY_ROUTE_GLOBAL,
-    .param_type = CRSF_PARAM_TYPE_INFO,
-    .w_func = elrs_menu_writing_func
-};
+uint8_t selected_mode = 0;
+const char mode_options[] = "Normal;Sport;";
+text_select_obj_t mode_value{&selected_mode, mode_options, sizeof(mode_options)};
 
-const char *options_txt[] = {"Ready", "Not Ready", "AfroAmercano", "2froAmercano", "3froAmercano"};
-char options[] = "Ready;Not Ready;AfroAmercano;2froAmercano;3froAmercano";
-uint8_t choice_curr = 0;
+int16_t limit = 100;
+int_obj_t limit_value{&limit, sizeof(limit), true, -500, 500, 100};
 
-text_select_obj_t test_select(&choice_curr, options, sizeof(options));
-param_entry_t e_cfg_3 {
-    .name = "Alabama",
-    .value = &test_select,
-    .entry_root = 2,
-    .param_type = CRSF_PARAM_TYPE_TEXT_SELECTION,
-    .w_func = elrs_menu_writing_func
-};
+enum class reset_state_t { idle, running, waiting_for_confirmation, complete };
+reset_state_t reset_state = reset_state_t::idle;
 
-// char str[] = "Folllder!!";
-param_entry_t e_cfg_5 {
-    .name = "MIX",
-    .value = NULL,
-    .entry_root = PARENT_ENTRY_ROUTE_GLOBAL,
-    .param_type = CRSF_PARAM_TYPE_FOLDER,
-    .w_func = elrs_menu_writing_func
-};
-
-enum example_command_state_t { READY, RUNNING, WAITING_CONFIRM, DONE };
-example_command_state_t command_state = READY;
-
-// Called synchronously from handle_exchange(). It must schedule/change state
-// only and return immediately.
-void exmp_func(command_obj_t &obj, command_type_e event) {
+// Called from handle_exchange(). Do not block here: schedule or advance work
+// in the application's event loop/task instead.
+void reset_handler(command_obj_t &command, command_type_e event) {
     switch (event) {
     case CMD_CLICK:
-        command_state = RUNNING;
-        obj.type = CDM_RESP_EXECUTING;
-        obj.change_description("Running…", sizeof("Running…"));
+        reset_state = reset_state_t::running;
+        command.type = CDM_RESP_EXECUTING;
+        command.change_description("Resetting", sizeof("Resetting"));
         break;
-
     case CMD_CONFIRMED:
-        command_state = RUNNING;
-        obj.type = CDM_RESP_EXECUTING;
+        reset_state = reset_state_t::running;
+        command.type = CDM_RESP_EXECUTING;
         break;
-
     case CMD_CANCEL:
-        command_state = READY;
-        obj.type = CDM_RESP_IDLE;
-        obj.change_description("Canceled.", sizeof("Canceled."));
+        reset_state = reset_state_t::idle;
+        command.type = CDM_RESP_IDLE;
+        command.change_description("Canceled", sizeof("Canceled"));
         break;
-
     case CMD_QUERY:
-        // Report state when the menu asks. Do not perform long work here.
-        if (command_state == WAITING_CONFIRM) {
-            obj.type = CDM_RESP_CONFIRM;
-            obj.change_description("Confirm :)", sizeof("Confirm :)"));
-        } else if (command_state == DONE) {
-            obj.type = CDM_RESP_IDLE;
-            obj.change_description("Done.", sizeof("Done."));
+        if (reset_state == reset_state_t::waiting_for_confirmation) {
+            command.type = CDM_RESP_CONFIRM;
+            command.change_description("Confirm reset?", sizeof("Confirm reset?"));
+        } else if (reset_state == reset_state_t::complete) {
+            command.type = CDM_RESP_IDLE;
+            command.change_description("Done", sizeof("Done"));
         }
         break;
-
     default:
         break;
     }
 }
 
-// Run this from the application loop or an application-owned worker.
-void command_tick() {
-    if (command_state == RUNNING && reset_step_is_complete()) {
-        command_state = WAITING_CONFIRM;
-    }
+command_obj_t reset_value{"Reset device", sizeof("Reset device"), 200, reset_handler};
+
+// Folder IDs are parameter-array indices plus one. This folder is entry 1.
+param_entry_t parameters[] = {
+    {"Settings", nullptr, PARENT_ENTRY_ROUTE_GLOBAL, CRSF_PARAM_TYPE_FOLDER},
+    {"Mode", &mode_value, 1, CRSF_PARAM_TYPE_TEXT_SELECTION},
+    {"Limit", &limit_value, 1, CRSF_PARAM_TYPE_INT16},
+    {"Status", &status_value, PARENT_ENTRY_ROUTE_GLOBAL, CRSF_PARAM_TYPE_INFO},
+    {"Reset", &reset_value, PARENT_ENTRY_ROUTE_GLOBAL, CRSF_PARAM_TYPE_COMMAND},
+};
+
+CrsfTransport transport;
+elrs_menu_config_t config{};
+config.device_info = {"Virtual Insanity", 0x434F4E56, 0x01000000, 0x00010203, 2};
+config.parameters = parameters;
+config.parameter_count = sizeof(parameters) / sizeof(parameters[0]);
+config.write = elrs_menu_write;
+config.write_context = &transport;
+
+elrs_menu_t menu{config};
+
+// The CRSF parser calls this only for an assembled, CRC-valid frame.
+void on_crsf_frame(const uint8_t *frame, size_t frame_size) {
+    handle_exchange(menu, frame, frame_size);
 }
-
-command_obj_t cmd = {"Hello world!", sizeof("Hello world!"), 200, exmp_func};
-param_entry_t e_cfg_7 {
-    .name = "COMMAND!",
-    .value = &cmd,
-    .entry_root = 2,
-    .param_type = CRSF_PARAM_TYPE_COMMAND,
-    .w_func = elrs_menu_writing_func
-};
-
-param_entry_t e_cfg_n {
-    .name = "Numbers",
-    .value = NULL,
-    .entry_root = PARENT_ENTRY_ROUTE_GLOBAL,
-    .param_type = CRSF_PARAM_TYPE_FOLDER,
-    .w_func = elrs_menu_writing_func
-};
-
-int16_t i16_cur = -120;
-int_obj_t i16_obj(&i16_cur, sizeof(i16_cur), true, -500, 500, i16_cur);
-param_entry_t e_cfg_16 {
-    .name = "INT16",
-    .value = &i16_obj,
-    .entry_root = 5,
-    .param_type = CRSF_PARAM_TYPE_INT16,
-    .w_func = elrs_menu_writing_func
-};
-
-uint16_t ui16_cur = 120;
-int_obj_t ui16_obj(&ui16_cur, sizeof(ui16_cur), false, 0, 130, ui16_cur);
-param_entry_t e_cfg_u16 {
-    .name = "UINT16",
-    .value = &ui16_obj,
-    .entry_root = 5,
-    .param_type = CRSF_PARAM_TYPE_UINT16,
-    .w_func = elrs_menu_writing_func
-};
-
-int8_t i8_cur = 8;
-int_obj_t i8_obj(&i8_cur, sizeof(i8_cur), true, 6, 20, i8_cur);
-param_entry_t e_cfg_8 {
-    .name = "INT8",
-    .value = &i8_obj,
-    .entry_root = 5,
-    .param_type = CRSF_PARAM_TYPE_INT8,
-    .w_func = elrs_menu_writing_func
-};
-
-uint8_t ui8_cur = 5;
-int_obj_t ui8_obj(&ui8_cur, sizeof(ui8_cur), false, 0, 12, ui8_cur);
-param_entry_t e_cfg_u8 {
-    .name = "UINT8",
-    .value = &ui8_obj,
-    .entry_root = 5,
-    .param_type = CRSF_PARAM_TYPE_UINT8,
-    .w_func = elrs_menu_writing_func
-};
-
-param_entry_t param_cfg[] = {e_cfg, e_cfg_5, e_cfg_3, e_cfg_7, e_cfg_n, e_cfg_u8, e_cfg_8, e_cfg_u16, e_cfg_16, ARR_TERMINATOR};
-
-lua_elrs_menu_config_t menu_cfg = {
-    .address = CRSF_ADDRESS_CRSF_TRANSMITTER,
-    .ping_responce = &r_cfg,
-    .prameters_list = param_cfg
-};

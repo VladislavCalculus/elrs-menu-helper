@@ -1,48 +1,31 @@
 #include "elrs_exhange.h"
-#include "../elrs_menu.h"
 
-param_entry_t ARR_TERMINATOR {
-    .name = "",
-    .value = NULL,
-    .entry_root = PARENT_ENTRY_ROUTE_GLOBAL,
-    .param_type = PARAM_ARRAY_TERMINATOR,
-    .w_func = NULL
-};
+void elrs_menu_t::reset() { requester_ = 0; next_parameter_ = 0; }
 
-param_entry_t STRING_HANDLE {
-    .name = ".",
-    .value = NULL,
-    .entry_root = PARENT_ENTRY_ROUTE_GLOBAL,
-    .param_type = CRSF_PARAM_TYPE_STRING,
-    .w_func = NULL
-};
-
-uint8_t requester = 0;
-uint8_t param_count = 0;
-uint8_t c_buffer[MAX_PACKET_SIZE];
-bool handle_exchange(uint8_t buffer[], lua_elrs_menu_config_t *cfg) {
-    if(buffer[2] == CRSF_TYPE_DEVICE_PING || (buffer[2] == CRSF_FRAMETYPE_PARAMETER_WRITE && buffer[5] == 0x00)) {
-        crsf_device_ping_response(buffer[4], cfg->ping_responce, cfg->prameters_list);
-        requester = buffer[4];
-        return true;
-    } else if(buffer[3] == cfg->address) {
-        if (requester != 0x0 && buffer[2] == CRSF_FRAMETYPE_PARAMETER_READ) {
-            if(cfg->prameters_list[param_count].param_type == PARAM_ARRAY_TERMINATOR) {
-                requester = 0;
-                param_count = 0;
-                return true;
-            }
-            crsf_send_param_entry_reply(param_count+1, cfg->address, cfg->prameters_list[param_count]);
-            param_count++;
-            if(cfg->ping_responce->param_count == param_count) {
-                requester = 0;
-                param_count = 0;
-            }
-        }
-        if(buffer[2] == CRSF_FRAMETYPE_PARAMETER_WRITE) {
-            crsf_device_write(buffer, buffer[5] != 0xFF ? &cfg->prameters_list[buffer[5]-1] : &STRING_HANDLE);
+bool handle_exchange(elrs_menu_t &menu, const uint8_t *frame, std::size_t frame_size) {
+    const elrs_menu_config_t *config = &menu.config_;
+    if (!frame || !config->write || !config->device_info.name ||
+        (config->parameter_count && !config->parameters) || config->parameter_count > 255 || frame_size < 6) return false;
+    const std::size_t frame_length = static_cast<std::size_t>(frame[1]) + 2;
+    if (frame[1] < 4 || frame_length > frame_size) return false;
+    const uint8_t type = frame[2];
+    const uint8_t requester = frame[4];
+    if (type == CRSF_TYPE_DEVICE_PING) {
+        crsf_device_ping_response(requester, *config); menu.requester_ = requester; menu.next_parameter_ = 0; return true;
+    }
+    if (frame[3] != config->addresses.device_address) return false;
+    if (type == CRSF_FRAMETYPE_PARAMETER_READ) {
+        if (menu.requester_ && menu.next_parameter_ < config->parameter_count) {
+            crsf_send_param_entry_reply(static_cast<uint8_t>(menu.next_parameter_ + 1), *config, config->parameters[menu.next_parameter_++]);
+            if (menu.next_parameter_ == config->parameter_count) menu.reset();
         }
         return true;
     }
-    return false;
+    if (type == CRSF_FRAMETYPE_PARAMETER_WRITE) {
+        const uint8_t id = frame[5];
+        if (id == 0) { crsf_device_ping_response(requester, *config); menu.requester_ = requester; menu.next_parameter_ = 0; }
+        else if (id != 0xff && id <= config->parameter_count) crsf_device_write(frame, frame_length, *config, config->parameters[id - 1]);
+        return true;
+    }
+    return true;
 }
